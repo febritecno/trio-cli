@@ -1,4 +1,4 @@
-# model-trio
+# trio-cli
 
 Run a coding session on three models at once, set up for Claude Code and OpenCode from one config file.
 
@@ -6,7 +6,7 @@ Run a coding session on three models at once, set up for Claude Code and OpenCod
 
 A coding session spends most of its tokens reading files and searching docs. If the strongest model does all of that, you pay its price for grep work and fill its context with file dumps before it reaches the decisions it is good at.
 
-model-trio splits the session into three agents:
+trio-cli splits the session into three agents:
 
 | Role | Job | Claude Code | OpenCode |
 |---|---|---|---|
@@ -23,21 +23,21 @@ The builder decides when to call the other two. Its prompt tells it to send scou
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/febritecno/trio/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/febritecno/trio-cli/main/install.sh | sh
 ```
 
 This downloads the `trio` binary for your OS (macOS or Linux, arm64 or x64) into `~/.local/bin`, then runs `trio apply`. `trio` is a single static binary of about 300 KB with no runtime dependencies.
 
 | Variable | Effect |
 |---|---|
-| `TRIO_VERSION=v0.2.0` | Install a specific release instead of the latest |
+| `TRIO_VERSION=v0.2.1` | Install a specific release instead of the latest |
 | `TRIO_INSTALL_DIR=/usr/local/bin` | Install somewhere other than `~/.local/bin` |
 | `TRIO_NO_APPLY=1` | Install the binary only, skip `trio apply` |
 
 To build from source you need [Zig](https://ziglang.org) 0.16:
 
 ```bash
-git clone https://github.com/febritecno/trio && cd trio
+git clone https://github.com/febritecno/trio-cli && cd trio-cli
 zig build -Drelease=true      # binary at zig-out/bin/trio
 ```
 
@@ -67,7 +67,7 @@ trio set roles.advisor.models.opencode google/gemini-3.1-pro
 
 ## Config
 
-The config lives in `~/.config/model-trio/` and you can edit it by hand. Run `trio apply` afterwards.
+The config lives in `~/.config/trio-cli/` and you can edit it by hand. Run `trio apply` afterwards.
 
 ```
 config.json          targets, agent names, descriptions, models
@@ -136,7 +136,7 @@ test/smoke.sh
 Push a tag and GitHub Actions builds the four binaries and publishes them with a `SHA256SUMS` file, which `install.sh` checks:
 
 ```bash
-git tag v0.2.0 && git push --tags
+git tag v0.2.1 && git push --tags
 ```
 
 ## License

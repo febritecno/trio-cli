@@ -8,7 +8,7 @@ const Value = json.Value;
 const Allocator = std.mem.Allocator;
 const path_util = std.Io.Dir.path;
 
-const version = "0.2.0";
+const version = "0.2.1";
 const role_keys = [_][]const u8{ "builder", "scout", "advisor" };
 
 const default_files = [_]struct { rel: []const u8, data: []const u8 }{
@@ -719,7 +719,7 @@ pub fn main(init: std.process.Init) !void {
         err_w.interface.flush() catch {};
         std.process.exit(1);
     };
-    const config_dir = init.environ_map.get("TRIO_HOME") orelse try path_util.join(a, &.{ home, ".config", "model-trio" });
+    const config_dir = init.environ_map.get("TRIO_HOME") orelse try path_util.join(a, &.{ home, ".config", "trio-cli" });
 
     var ctx: Ctx = .{
         .io = io,

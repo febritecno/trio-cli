@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs the trio CLI, then runs `trio apply`.
-#   curl -fsSL https://raw.githubusercontent.com/febritecno/trio/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/febritecno/trio-cli/main/install.sh | sh
 #
 # Environment:
 #   TRIO_VERSION      release tag to install (default: latest)
@@ -10,7 +10,7 @@ set -eu
 
 main() {
 
-REPO="febritecno/trio"
+REPO="febritecno/trio-cli"
 DIR="${TRIO_INSTALL_DIR:-$HOME/.local/bin}"
 
 say() { printf '%s\n' "$*"; }
