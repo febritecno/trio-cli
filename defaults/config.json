@@ -1,0 +1,64 @@
+{
+  "targets": {
+    "claude": {
+      "enabled": true,
+      "scope": "user",
+      "setDefault": true
+    },
+    "opencode": {
+      "enabled": true,
+      "scope": "user",
+      "setDefault": false
+    }
+  },
+  "roles": {
+    "builder": {
+      "name": "conductor",
+      "description": "Runs the session and writes the code. Delegates exploration to scout and consults advisor at key decisions.",
+      "prompt": "prompts/builder.md",
+      "models": {
+        "claude": "sonnet",
+        "opencode": "opencode/claude-sonnet-5-5"
+      }
+    },
+    "scout": {
+      "name": "scout",
+      "description": "Fast, cheap read-only explorer. Use for locating code, reading files, tracing call paths, and looking up documentation. Launch several in parallel, one per independent question. Does not edit files or make design decisions.",
+      "prompt": "prompts/scout.md",
+      "models": {
+        "claude": "haiku",
+        "opencode": "opencode/claude-haiku-5-5"
+      },
+      "frontmatter": {
+        "claude": {
+          "tools": "Read, Grep, Glob, WebFetch, WebSearch"
+        },
+        "opencode": {
+          "permission": {
+            "edit": "deny",
+            "bash": "deny"
+          }
+        }
+      }
+    },
+    "advisor": {
+      "name": "advisor",
+      "description": "Senior reviewer for high-stakes moments only. Use to review a plan before a large or hard-to-reverse change, to get unstuck after the same error has survived two fix attempts, and for a final check before declaring a non-trivial task done. Not for routine edits, lookups, or exploration.",
+      "prompt": "prompts/advisor.md",
+      "models": {
+        "claude": "opus",
+        "opencode": "opencode/claude-opus-5-5"
+      },
+      "frontmatter": {
+        "claude": {
+          "tools": "Read, Grep, Glob, Bash"
+        },
+        "opencode": {
+          "permission": {
+            "edit": "deny"
+          }
+        }
+      }
+    }
+  }
+}
