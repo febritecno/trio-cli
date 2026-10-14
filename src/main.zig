@@ -8,7 +8,7 @@ const Value = json.Value;
 const Allocator = std.mem.Allocator;
 const path_util = std.Io.Dir.path;
 
-const version = "0.4.0";
+const version = "0.4.1";
 const role_keys = [_][]const u8{ "builder", "scout", "advisor" };
 
 const default_files = [_]struct { rel: []const u8, data: []const u8 }{
