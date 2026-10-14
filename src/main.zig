@@ -18,6 +18,8 @@ const default_files = [_]struct { rel: []const u8, data: []const u8 }{
     .{ .rel = "prompts/advisor.md", .data = @embedFile("defaults_advisor") },
 };
 
+const other_prompt = @embedFile("defaults_other_prompt");
+
 const help_text =
     \\trio {s} - one config, three models (builder / scout / advisor)
     \\
@@ -35,6 +37,7 @@ const help_text =
     \\                                  trio set targets.opencode.setDefault true
     \\  trio edit [what]           Open config | builder | scout | advisor in $EDITOR, then apply
     \\  trio uninstall [--yes]     Disable, then delete the config and the trio binary itself
+    \\  trio prompt                Print a prompt to paste into an agent trio does not support yet (also: --other)
     \\  trio path                  Print the config directory
     \\  trio version               Print the version
     \\
@@ -49,6 +52,7 @@ const help_text =
     \\  trio init --opencode                   turn OpenCode on, globally
     \\  trio apply --cursor --dir ~/work/app   Cursor agents inside ~/work/app
     \\  trio disable --codex                   remove the Codex agents only
+    \\  trio prompt                            other agent: it installs and configures itself
     \\
     \\Config lives in {s}
     \\
@@ -945,6 +949,7 @@ fn run(c: *Ctx, env: *std.process.Environ.Map, argv: []const []const u8) !void {
         } else try pos.append(c.a, arg);
     }
     c.dry_run = flags.contains("--dry-run");
+    if (flags.contains("--other")) return c.out.writeAll(other_prompt);
     if (flags.contains("--version")) return c.log("trio {s}", .{version});
     if (pos.items.len == 0) return printHelp(c);
 
@@ -969,6 +974,7 @@ fn run(c: *Ctx, env: *std.process.Environ.Map, argv: []const []const u8) !void {
         if (sel.any()) return applyConfig(c, try applySelection(c, sel, true, was_missing));
         return;
     }
+    if (eq(u8, cmd, "prompt")) return c.out.writeAll(other_prompt);
     if (eq(u8, cmd, "path")) return c.log("{s}", .{c.config_dir});
     if (eq(u8, cmd, "version")) return c.log("trio {s}", .{version});
     if (eq(u8, cmd, "help") or flags.contains("--help")) return printHelp(c);

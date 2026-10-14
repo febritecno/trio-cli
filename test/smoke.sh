@@ -3,6 +3,7 @@
 set -u
 BIN=$(cd "$(dirname "${1:-zig-out/bin/trio}")" && pwd)/$(basename "${1:-zig-out/bin/trio}")
 fails=0
+ROOT=$(pwd)
 
 new_home() {
   H=$(mktemp -d)
@@ -187,6 +188,11 @@ check "dry run keeps binary" test -e "$H/bin/trio"
 check "agents gone" missing "$H/.claude/agents/scout.md"
 check "config gone" missing "$H/trio-config"
 check "binary gone" missing "$H/bin/trio"
+
+echo "prompt for other agents"
+check "prompt prints"   sh -c "'$BIN' prompt | grep -q 'Set up trio-cli for yourself'"
+check "--other prints"  sh -c "'$BIN' apply --other | grep -q 'Set up trio-cli for yourself'"
+check "readme in sync"  sh -c "'$BIN' prompt | grep -vxFf '$ROOT/README.md' | wc -l | grep -qx ' *0'"
 
 echo "misc"
 check "version" sh -c "'$BIN' version | grep -q '^trio '"

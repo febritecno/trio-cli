@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
         .{ "defaults_builder", "defaults/prompts/builder.md" },
         .{ "defaults_scout", "defaults/prompts/scout.md" },
         .{ "defaults_advisor", "defaults/prompts/advisor.md" },
+        .{ "defaults_other_prompt", "defaults/other-prompt.md" },
     };
     for (embedded) |e| mod.addAnonymousImport(e[0], .{ .root_source_file = b.path(e[1]) });
 
