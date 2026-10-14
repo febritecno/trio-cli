@@ -9,6 +9,30 @@
       "enabled": true,
       "scope": "user",
       "setDefault": false
+    },
+    "cursor": {
+      "enabled": false,
+      "scope": "user"
+    },
+    "copilot": {
+      "enabled": false,
+      "scope": "user"
+    },
+    "gemini": {
+      "enabled": false,
+      "scope": "user"
+    },
+    "droid": {
+      "enabled": false,
+      "scope": "user"
+    },
+    "kilo": {
+      "enabled": false,
+      "scope": "user"
+    },
+    "codex": {
+      "enabled": false,
+      "scope": "user"
     }
   },
   "roles": {
@@ -18,7 +42,13 @@
       "prompt": "prompts/builder.md",
       "models": {
         "claude": "sonnet",
-        "opencode": "opencode/claude-sonnet-5-5"
+        "opencode": "opencode/claude-sonnet-5-5",
+        "cursor": "inherit",
+        "copilot": "inherit",
+        "gemini": "inherit",
+        "droid": "inherit",
+        "kilo": "inherit",
+        "codex": "inherit"
       }
     },
     "scout": {
@@ -27,7 +57,13 @@
       "prompt": "prompts/scout.md",
       "models": {
         "claude": "haiku",
-        "opencode": "opencode/claude-haiku-5-5"
+        "opencode": "opencode/claude-haiku-5-5",
+        "cursor": "inherit",
+        "copilot": "inherit",
+        "gemini": "inherit",
+        "droid": "inherit",
+        "kilo": "inherit",
+        "codex": "inherit"
       },
       "frontmatter": {
         "claude": {
@@ -38,6 +74,35 @@
             "edit": "deny",
             "bash": "deny"
           }
+        },
+        "cursor": {
+          "readonly": true
+        },
+        "copilot": {
+          "tools": [
+            "read",
+            "search",
+            "web"
+          ]
+        },
+        "droid": {
+          "tools": [
+            "Read",
+            "LS",
+            "Grep",
+            "Glob",
+            "WebSearch",
+            "FetchUrl"
+          ]
+        },
+        "kilo": {
+          "permission": {
+            "edit": "deny",
+            "bash": "deny"
+          }
+        },
+        "codex": {
+          "sandbox_mode": "read-only"
         }
       }
     },
@@ -47,7 +112,13 @@
       "prompt": "prompts/advisor.md",
       "models": {
         "claude": "opus",
-        "opencode": "opencode/claude-opus-5-5"
+        "opencode": "opencode/claude-opus-5-5",
+        "cursor": "inherit",
+        "copilot": "inherit",
+        "gemini": "inherit",
+        "droid": "inherit",
+        "kilo": "inherit",
+        "codex": "inherit"
       },
       "frontmatter": {
         "claude": {
@@ -57,6 +128,33 @@
           "permission": {
             "edit": "deny"
           }
+        },
+        "cursor": {
+          "readonly": true
+        },
+        "copilot": {
+          "tools": [
+            "read",
+            "search",
+            "execute"
+          ]
+        },
+        "droid": {
+          "tools": [
+            "Read",
+            "LS",
+            "Grep",
+            "Glob",
+            "Execute"
+          ]
+        },
+        "kilo": {
+          "permission": {
+            "edit": "deny"
+          }
+        },
+        "codex": {
+          "sandbox_mode": "read-only"
         }
       }
     }

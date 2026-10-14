@@ -102,6 +102,63 @@ check "user file gone" missing "$H/.claude/agents/scout.md"
 trio set targets.opencode.enabled false
 check "opencode gone" missing "$H/.config/opencode/agents/scout.md"
 
+echo "init with target flags: only those targets, global by default"
+new_home
+trio init --cursor --codex
+check "cursor global"   test -e "$H/.cursor/agents/scout.md"
+check "cursor readonly" has "$H/.cursor/agents/scout.md" '^readonly: true$'
+check "codex toml"      has "$H/.codex/agents/scout.toml" '^sandbox_mode = "read-only"$'
+check "no claude"       missing "$H/.claude"
+check "no opencode"     missing "$H/.config/opencode"
+check "nothing in cwd"  missing "$H/project/.cursor"
+
+echo "--dir and --project install into a folder; -g moves back"
+new_home
+mkdir "$H/app"
+trio apply
+trio apply --copilot --dir "$H/app"
+check "copilot in folder" test -e "$H/app/.github/agents/scout.agent.md"
+check "copilot tools"     has "$H/app/.github/agents/scout.agent.md" '^tools: \["read", "search", "web"\]$'
+check "claude untouched by flag" test -e "$H/.claude/agents/scout.md"
+trio apply --gemini --project
+check "project = cwd"     test -e "$H/project/.gemini/agents/scout.md"
+trio apply --copilot -g
+check "copilot global"    test -e "$H/.copilot/agents/scout.agent.md"
+check "folder cleaned"    missing "$H/app/.github/agents/scout.agent.md"
+check "bad dir fails"     sh -c "! '$BIN' apply --cursor --dir '$H/nope' >/dev/null 2>&1"
+
+echo "disable one target keeps the rest"
+new_home
+trio apply
+trio apply --cursor
+trio disable --cursor
+check "cursor gone"      missing "$H/.cursor/agents/scout.md"
+check "claude kept"      test -e "$H/.claude/agents/scout.md"
+check "config kept"      has "$H/trio-config/config.json" '"cursor"'
+
+echo "disable without config installs nothing; --project pins the folder"
+new_home
+check "disable on empty fails" sh -c "! '$BIN' disable --cursor >/dev/null 2>&1"
+check "no agents written"      missing "$H/.claude"
+trio init --gemini --project
+mkdir "$H/other" && cd "$H/other"
+trio apply
+check "gemini stays in first folder" test -e "$H/project/.gemini/agents/scout.md"
+check "not written to other folder"  missing "$H/other/.gemini"
+
+echo "set on an old config merges target defaults"
+new_home
+trio apply
+trio set targets.cursor.enabled true
+check "cursor readonly via set" has "$H/.cursor/agents/scout.md" '^readonly: true$'
+
+echo "--all enables every target"
+new_home
+trio apply --all
+for d in .claude .config/opencode .cursor .copilot .gemini .factory .config/kilo .codex; do
+  check "all: $d" test -d "$H/$d"
+done
+
 echo "dry run writes nothing"
 new_home
 trio init

@@ -22,21 +22,35 @@ const help_text =
     \\trio {s} - one config, three models (builder / scout / advisor)
     \\
     \\Usage:
-    \\  trio apply [--dry-run]     Generate agents for every enabled target (creates the config on first run)
+    \\  trio apply [targets] [scope] [--dry-run]
+    \\                             Generate agents for every enabled target (creates the config on first run)
+    \\  trio init [targets] [scope] [--force]
+    \\                             Write the default config; with targets, also turn them on
+    \\  trio enable [targets] [scope]   Same as apply
+    \\  trio disable [targets] [--dry-run]
+    \\                             Delete generated agents (only the named targets if given), keep the config
     \\  trio status                Show the config and what is installed
     \\  trio set <key> <value>     Change one config value, then apply
     \\                             e.g. trio set roles.advisor.models.opencode google/gemini-3.1-pro
     \\                                  trio set targets.opencode.setDefault true
     \\  trio edit [what]           Open config | builder | scout | advisor in $EDITOR, then apply
-    \\  trio init [--force]        Write the default config and prompts (--force overwrites yours)
-    \\  trio enable                Turn trio on: generate the agents (same as apply)
-    \\  trio disable [--dry-run]   Turn trio off: delete generated agents, restore the previous default agent, keep the config
     \\  trio uninstall [--yes]     Disable, then delete the config and the trio binary itself
     \\  trio path                  Print the config directory
     \\  trio version               Print the version
     \\
+    \\Targets: --claude --opencode --cursor --copilot --gemini --droid --kilo --codex, or --all
+    \\  With no target flag, every target enabled in the config is used.
+    \\Scope:   default is global (your home directory).
+    \\  --project        install into the current folder
+    \\  --dir <folder>   install into that folder
+    \\  -g, --global     back to global
+    \\
+    \\Examples:
+    \\  trio init --opencode                   turn OpenCode on, globally
+    \\  trio apply --cursor --dir ~/work/app   Cursor agents inside ~/work/app
+    \\  trio disable --codex                   remove the Codex agents only
+    \\
     \\Config lives in {s}
-    \\Targets: claude, opencode. Scope "user" installs globally, "project" into the current directory.
     \\
 ;
 
@@ -240,7 +254,7 @@ fn roleModel(cfg: Value, key: []const u8, target: Target) ?[]const u8 {
     return if (m == .string) m.string else null;
 }
 
-const TargetOpts = struct { enabled: bool = false, project: bool = false, set_default: bool = false };
+const TargetOpts = struct { enabled: bool = false, project: bool = false, set_default: bool = false, dir: ?[]const u8 = null };
 
 fn targetOpts(cfg: Value, target: Target) TargetOpts {
     var o: TargetOpts = .{};
@@ -251,6 +265,9 @@ fn targetOpts(cfg: Value, target: Target) TargetOpts {
     if (t.object.get("enabled")) |v| o.enabled = (v == .bool and v.bool);
     if (t.object.get("setDefault")) |v| o.set_default = (v == .bool and v.bool);
     if (t.object.get("scope")) |v| o.project = (v == .string and std.mem.eql(u8, v.string, "project"));
+    if (t.object.get("dir")) |v| if (v == .string and v.string.len > 0) {
+        o.dir = v.string;
+    };
     return o;
 }
 
@@ -302,7 +319,19 @@ const YamlError = Io.Writer.Error || Allocator.Error;
 
 fn yamlScalar(c: *Ctx, w: *Io.Writer, indent: []const u8, key: []const u8, v: Value) YamlError!void {
     switch (v) {
-        .null, .array => {},
+        .null => {},
+        .array => |arr| {
+            // Only flat string lists are written, e.g. `tools: [read, search]`.
+            try w.print("{s}{s}: [", .{ indent, key });
+            var first = true;
+            for (arr.items) |item| {
+                if (item != .string) continue;
+                if (!first) try w.writeAll(", ");
+                first = false;
+                try w.writeAll(try jsonString(c, item.string));
+            }
+            try w.writeAll("]\n");
+        },
         .string => |s| {
             if (needsQuotes(s)) {
                 try w.print("{s}{s}: {s}\n", .{ indent, key, try jsonString(c, s) });
@@ -325,47 +354,109 @@ fn yamlMap(c: *Ctx, w: *Io.Writer, indent: []const u8, o: json.ObjectMap) YamlEr
     for (o.keys(), o.values()) |k, v| try yamlScalar(c, w, indent, k, v);
 }
 
+fn tomlScalar(c: *Ctx, w: *Io.Writer, key: []const u8, v: Value) YamlError!void {
+    switch (v) {
+        .string => |s| try w.print("{s} = {s}\n", .{ key, try jsonString(c, s) }),
+        .bool => |b| try w.print("{s} = {}\n", .{ key, b }),
+        .integer => |n| try w.print("{s} = {d}\n", .{ key, n }),
+        .float => |f| try w.print("{s} = {d}\n", .{ key, f }),
+        else => {},
+    }
+}
+
 // ---------------------------------------------------------------- targets
+
+const Format = enum { markdown, toml };
+
+const Spec = struct {
+    label: []const u8,
+    /// Agent directory relative to $HOME (user scope).
+    user: []const u8,
+    /// Agent directory relative to the project folder (project scope).
+    project: []const u8,
+    ext: []const u8 = ".md",
+    format: Format = .markdown,
+    /// Write `name:` in the frontmatter (some tools take the name from the file name).
+    name_field: bool = true,
+    /// Write `mode: primary|subagent` in the frontmatter.
+    mode_field: bool = false,
+    /// Write `model: inherit` literally. Otherwise an inherited model omits the line.
+    inherit_literal: bool = false,
+    /// The tool has a config key that selects the default agent.
+    has_default: bool = false,
+};
 
 const Target = enum {
     claude,
     opencode,
+    cursor,
+    copilot,
+    gemini,
+    droid,
+    kilo,
+    codex,
 
     fn id(t: Target) []const u8 {
         return @tagName(t);
     }
 
+    fn spec(t: Target) Spec {
+        return switch (t) {
+            .claude => .{ .label = "Claude Code", .user = ".claude/agents", .project = ".claude/agents", .inherit_literal = true, .has_default = true },
+            .opencode => .{ .label = "OpenCode", .user = ".config/opencode/agents", .project = ".opencode/agents", .name_field = false, .mode_field = true, .has_default = true },
+            .cursor => .{ .label = "Cursor", .user = ".cursor/agents", .project = ".cursor/agents", .inherit_literal = true },
+            .copilot => .{ .label = "GitHub Copilot", .user = ".copilot/agents", .project = ".github/agents", .ext = ".agent.md" },
+            .gemini => .{ .label = "Gemini CLI", .user = ".gemini/agents", .project = ".gemini/agents" },
+            .droid => .{ .label = "Factory Droid", .user = ".factory/droids", .project = ".factory/droids", .inherit_literal = true },
+            .kilo => .{ .label = "Kilo Code", .user = ".config/kilo/agent", .project = ".kilo/agents", .name_field = false, .mode_field = true },
+            .codex => .{ .label = "Codex", .user = ".codex/agents", .project = ".codex/agents", .ext = ".toml", .format = .toml },
+        };
+    }
+
     fn label(t: Target) []const u8 {
-        return switch (t) {
-            .claude => "Claude Code",
-            .opencode => "OpenCode",
-        };
+        return t.spec().label;
     }
 
-    fn agentPath(t: Target, c: *Ctx, project: bool, name: []const u8) ![]u8 {
-        const file = try std.fmt.allocPrint(c.a, "{s}.md", .{name});
-        return switch (t) {
-            .claude => if (project) c.join(&.{ c.cwd, ".claude", "agents", file }) else c.join(&.{ c.home, ".claude", "agents", file }),
-            .opencode => if (project) c.join(&.{ c.cwd, ".opencode", "agents", file }) else c.join(&.{ c.home, ".config", "opencode", "agents", file }),
-        };
+    fn agentPath(t: Target, c: *Ctx, o: TargetOpts, name: []const u8) ![]u8 {
+        const sp = t.spec();
+        const file = try std.fmt.allocPrint(c.a, "{s}{s}", .{ name, sp.ext });
+        if (o.project) return c.join(&.{ o.dir orelse c.cwd, sp.project, file });
+        return c.join(&.{ c.home, sp.user, file });
     }
 
-    fn settingsPath(t: Target, c: *Ctx, project: bool) ![]u8 {
+    /// Only meaningful for targets with `has_default`.
+    fn settingsPath(t: Target, c: *Ctx, o: TargetOpts) ![]u8 {
+        const base = if (o.project) (o.dir orelse c.cwd) else c.home;
         return switch (t) {
-            .claude => if (project) c.join(&.{ c.cwd, ".claude", "settings.json" }) else c.join(&.{ c.home, ".claude", "settings.json" }),
-            .opencode => if (project) c.join(&.{ c.cwd, "opencode.json" }) else c.join(&.{ c.home, ".config", "opencode", "opencode.json" }),
+            .claude => c.join(&.{ base, ".claude", "settings.json" }),
+            .opencode => if (o.project) c.join(&.{ base, "opencode.json" }) else c.join(&.{ base, ".config", "opencode", "opencode.json" }),
+            else => unreachable,
         };
     }
 
     fn render(t: Target, c: *Ctx, cfg: Value, key: []const u8, model: []const u8, body: []const u8) ![]u8 {
+        const sp = t.spec();
         const role = roleOf(cfg, key);
+        const has_model = !(model.len == 0 or std.mem.eql(u8, model, "inherit")) or sp.inherit_literal;
         var aw: Io.Writer.Allocating = .init(c.a);
         const w = &aw.writer;
+        if (sp.format == .toml) {
+            try tomlScalar(c, w, "name", role.object.get("name").?);
+            try tomlScalar(c, w, "description", role.object.get("description").?);
+            if (has_model) try tomlScalar(c, w, "model", .{ .string = model });
+            if (role.object.get("frontmatter")) |fm| if (fm == .object) {
+                if (fm.object.get(t.id())) |extra| if (extra == .object) {
+                    for (extra.object.keys(), extra.object.values()) |k, v| try tomlScalar(c, w, k, v);
+                };
+            };
+            try tomlScalar(c, w, "developer_instructions", .{ .string = body });
+            return aw.written();
+        }
         try w.writeAll("---\n");
-        if (t == .claude) try yamlScalar(c, w, "", "name", role.object.get("name").?);
+        if (sp.name_field) try yamlScalar(c, w, "", "name", role.object.get("name").?);
         try yamlScalar(c, w, "", "description", role.object.get("description").?);
-        if (t == .opencode) try yamlScalar(c, w, "", "mode", .{ .string = if (std.mem.eql(u8, key, "builder")) "primary" else "subagent" });
-        try yamlScalar(c, w, "", "model", .{ .string = model });
+        if (sp.mode_field) try yamlScalar(c, w, "", "mode", .{ .string = if (std.mem.eql(u8, key, "builder")) "primary" else "subagent" });
+        if (has_model) try yamlScalar(c, w, "", "model", .{ .string = model });
         if (role.object.get("frontmatter")) |fm| if (fm == .object) {
             if (fm.object.get(t.id())) |extra| if (extra == .object) try yamlMap(c, w, "", extra.object);
         };
@@ -383,6 +474,7 @@ const Target = enum {
                 return if (v == .string) v.string else null;
             },
             .opencode => return if (findDefaultLine(raw)) |l| l.value else null,
+            else => return null,
         }
     }
 
@@ -404,6 +496,7 @@ const Target = enum {
                 try writeFile(c, file, try prettyJson(c, root));
             },
             .opencode => try setOpencodeDefault(c, file, name),
+            else => {},
         }
     }
 };
@@ -553,7 +646,15 @@ fn cmdApply(c: *Ctx) !void {
         _ = try initConfig(c, false);
         c.log("Created default config in {s}", .{c.config_dir});
     }
-    const cfg = try loadConfig(c);
+    return applyConfig(c, try loadConfig(c));
+}
+
+fn scopeLabel(c: *Ctx, o: TargetOpts) []const u8 {
+    if (!o.project) return "user";
+    return std.fmt.allocPrint(c.a, "project: {s}", .{o.dir orelse c.cwd}) catch "project";
+}
+
+fn applyConfig(c: *Ctx, cfg: Value) !void {
     var st = try readState(c);
     var wanted_files: std.StringHashMapUnmanaged(void) = .empty;
     var wanted_defaults: std.StringHashMapUnmanaged(void) = .empty;
@@ -562,18 +663,19 @@ fn cmdApply(c: *Ctx) !void {
         const target: Target = @enumFromInt(f.value);
         const opts = targetOpts(cfg, target);
         if (opts.enabled) {
-            c.log("{s} ({s})", .{ target.label(), if (opts.project) "project" else "user" });
+            c.log("{s} ({s})", .{ target.label(), scopeLabel(c, opts) });
             for (role_keys) |key| {
-                const model = roleModel(cfg, key, target) orelse
-                    return c.fail("config: roles.{s}.models.{s} is missing", .{ key, target.id() });
-                const file = try target.agentPath(c, opts.project, roleStr(cfg, key, "name"));
+                const model = roleModel(cfg, key, target) orelse "inherit";
+                const file = try target.agentPath(c, opts, roleStr(cfg, key, "name"));
                 try wanted_files.put(c.a, file, {});
                 const content = try target.render(c, cfg, key, model, try renderPrompt(c, cfg, key));
                 try writeManaged(c, file, content, &st);
             }
-            const settings = try target.settingsPath(c, opts.project);
-            if (opts.set_default) try wanted_defaults.put(c.a, try std.fmt.allocPrint(c.a, "{s}:{s}", .{ target.id(), settings }), {});
-            try syncDefault(c, target, settings, if (opts.set_default) roleStr(cfg, "builder", "name") else null, &st);
+            if (target.spec().has_default) {
+                const settings = try target.settingsPath(c, opts);
+                if (opts.set_default) try wanted_defaults.put(c.a, try std.fmt.allocPrint(c.a, "{s}:{s}", .{ target.id(), settings }), {});
+                try syncDefault(c, target, settings, if (opts.set_default) roleStr(cfg, "builder", "name") else null, &st);
+            }
         }
     }
 
@@ -588,6 +690,116 @@ fn cmdApply(c: *Ctx) !void {
     for (stale_defaults.items) |key| try syncStaleDefault(c, key, &st);
 
     if (c.dry_run) c.log("Dry run: nothing was written.", .{}) else try writeState(c, &st);
+}
+
+// ---------------------------------------------------------------- target selection
+
+const Scope = enum { keep, user, project };
+
+/// Targets and scope picked on the command line, e.g. `--opencode --cursor --dir ./app`.
+const Selection = struct {
+    targets: std.EnumSet(Target) = .initEmpty(),
+    all: bool = false,
+    scope: Scope = .keep,
+    dir: ?[]const u8 = null,
+
+    fn explicit(sel: Selection) bool {
+        return sel.all or sel.targets.count() > 0;
+    }
+
+    fn any(sel: Selection) bool {
+        return sel.explicit() or sel.scope != .keep;
+    }
+};
+
+fn ensureObj(c: *Ctx, node: *Value, key: []const u8) !*Value {
+    if (node.* != .object) node.* = .{ .object = .empty };
+    const gop = try node.object.getOrPut(c.a, key);
+    if (!gop.found_existing or gop.value_ptr.* != .object) gop.value_ptr.* = .{ .object = .empty };
+    return gop.value_ptr;
+}
+
+/// Copies this target's block, models and frontmatter from the built-in defaults
+/// into a config that predates the target. Existing values are never overwritten.
+fn mergeTargetDefaults(c: *Ctx, cfg: *Value, target: Target) !void {
+    const defaults = try json.parseFromSliceLeaky(Value, c.a, default_files[0].data, .{});
+    const id = target.id();
+    const targets = try ensureObj(c, cfg, "targets");
+    if (!targets.object.contains(id)) {
+        if (defaults.object.get("targets")) |dt| if (dt == .object) if (dt.object.get(id)) |block| {
+            try targets.object.put(c.a, id, block);
+        };
+    }
+    const roles = try ensureObj(c, cfg, "roles");
+    for (role_keys) |key| {
+        const dr = (defaults.object.get("roles") orelse continue).object.get(key) orelse continue;
+        const role = try ensureObj(c, roles, key);
+        for ([_][]const u8{ "models", "frontmatter" }) |section| {
+            const dsec = dr.object.get(section) orelse continue;
+            if (dsec != .object) continue;
+            const dval = dsec.object.get(id) orelse continue;
+            const sec = try ensureObj(c, role, section);
+            if (!sec.object.contains(id)) try sec.object.put(c.a, id, dval);
+        }
+    }
+}
+
+fn setTargetField(c: *Ctx, cfg: *Value, target: Target, field: []const u8, v: ?Value) !void {
+    const block = try ensureObj(c, try ensureObj(c, cfg, "targets"), target.id());
+    if (v) |val| try block.object.put(c.a, field, val) else _ = block.object.orderedRemove(field);
+}
+
+/// Turns the selected targets on (or off) in the config, applying --project / --dir / --global.
+fn applySelection(c: *Ctx, sel: Selection, enable: bool, was_missing: bool) !Value {
+    var fresh = was_missing;
+    if (!exists(c, try c.configPath())) {
+        if (!enable) return c.fail("nothing to disable: no config at {s}", .{try c.configPath()});
+        if (c.dry_run) return c.fail("no config yet; run `trio init` first, then --dry-run", .{});
+        _ = try initConfig(c, false);
+        c.log("Created default config in {s}", .{c.config_dir});
+        fresh = true;
+    }
+    var cfg = try loadConfig(c);
+
+    var chosen: std.EnumSet(Target) = .initEmpty();
+    if (sel.all) {
+        chosen = .initFull();
+    } else if (sel.targets.count() > 0) {
+        chosen = sel.targets;
+    } else {
+        // Scope flags alone act on whatever is already enabled.
+        inline for (std.meta.fields(Target)) |f| {
+            const t: Target = @enumFromInt(f.value);
+            if (targetOpts(cfg, t).enabled) chosen.insert(t);
+        }
+    }
+
+    var abs_dir: ?[]const u8 = null;
+    if (sel.dir) |d| {
+        const resolved = try path_util.resolve(c.a, &.{ c.cwd, d });
+        var folder = Io.Dir.cwd().openDir(c.io, resolved, .{}) catch return c.fail("--dir {s}: not a folder", .{resolved});
+        folder.close(c.io);
+        abs_dir = resolved;
+    }
+
+    var it = chosen.iterator();
+    while (it.next()) |t| {
+        if (enable) try mergeTargetDefaults(c, &cfg, t);
+        try setTargetField(c, &cfg, t, "enabled", .{ .bool = enable });
+        if (enable and sel.scope != .keep) {
+            try setTargetField(c, &cfg, t, "scope", .{ .string = if (sel.scope == .project) "project" else "user" });
+            try setTargetField(c, &cfg, t, "dir", if (sel.scope == .project) Value{ .string = abs_dir orelse c.cwd } else null);
+        }
+    }
+    // On a brand-new config, "init --cursor" means only Cursor, not the default pair as well.
+    if (fresh and enable and sel.explicit() and !sel.all) {
+        inline for (std.meta.fields(Target)) |f| {
+            const t: Target = @enumFromInt(f.value);
+            if (!chosen.contains(t)) try setTargetField(c, &cfg, t, "enabled", .{ .bool = false });
+        }
+    }
+    if (!c.dry_run) try writeFile(c, try c.configPath(), try prettyJson(c, cfg));
+    return cfg;
 }
 
 fn cmdRemove(c: *Ctx) !void {
@@ -630,11 +842,15 @@ fn cmdStatus(c: *Ctx) !void {
         if (!opts.enabled) {
             c.log("\n{s}: disabled", .{target.label()});
         } else {
-            const cur = try target.getDefault(c, try target.settingsPath(c, opts.project));
-            c.log("\n{s} ({s}), default agent: {s}", .{ target.label(), if (opts.project) "project" else "user", cur orelse "(none)" });
+            if (target.spec().has_default) {
+                const cur = try target.getDefault(c, try target.settingsPath(c, opts));
+                c.log("\n{s} ({s}), default agent: {s}", .{ target.label(), scopeLabel(c, opts), cur orelse "(none)" });
+            } else {
+                c.log("\n{s} ({s})", .{ target.label(), scopeLabel(c, opts) });
+            }
             for (role_keys) |key| {
                 const name = roleStr(cfg, key, "name");
-                const file = try target.agentPath(c, opts.project, name);
+                const file = try target.agentPath(c, opts, name);
                 const installed: []const u8 = if (!exists(c, file)) "not installed" else if (st.files.contains(file)) "installed" else "exists, not managed by trio";
                 c.log("  {s: <8} {s: <12} {s: <30} {s}", .{ key, name, roleModel(cfg, key, target) orelse "(no model)", installed });
             }
@@ -652,6 +868,9 @@ fn cmdSet(c: *Ctx, args: []const []const u8) !void {
     var it = std.mem.splitScalar(u8, args[0], '.');
     while (it.next()) |k| try keys.append(c.a, k);
 
+    if (keys.items.len > 1 and std.mem.eql(u8, keys.items[0], "targets")) {
+        if (std.meta.stringToEnum(Target, keys.items[1])) |t| try mergeTargetDefaults(c, &cfg, t);
+    }
     var node: *Value = &cfg;
     for (keys.items[0 .. keys.items.len - 1]) |k| {
         const gop = try node.object.getOrPut(c.a, k);
@@ -706,8 +925,24 @@ fn printHelp(c: *Ctx) void {
 fn run(c: *Ctx, env: *std.process.Environ.Map, argv: []const []const u8) !void {
     var flags: std.StringHashMapUnmanaged(void) = .empty;
     var pos: std.ArrayList([]const u8) = .empty;
-    for (argv) |arg| {
-        if (std.mem.startsWith(u8, arg, "--")) try flags.put(c.a, arg, {}) else try pos.append(c.a, arg);
+    var sel: Selection = .{};
+    var i: usize = 0;
+    while (i < argv.len) : (i += 1) {
+        const arg = argv[i];
+        if (std.mem.eql(u8, arg, "--dir")) {
+            i += 1;
+            if (i >= argv.len) return c.fail("--dir needs a folder", .{});
+            sel.dir = argv[i];
+            sel.scope = .project;
+        } else if (std.mem.eql(u8, arg, "--project")) {
+            sel.scope = .project;
+        } else if (std.mem.eql(u8, arg, "--global") or std.mem.eql(u8, arg, "-g")) {
+            sel.scope = .user;
+        } else if (std.mem.eql(u8, arg, "--all")) {
+            sel.all = true;
+        } else if (std.mem.startsWith(u8, arg, "--")) {
+            if (std.meta.stringToEnum(Target, arg[2..])) |t| sel.targets.insert(t) else try flags.put(c.a, arg, {});
+        } else try pos.append(c.a, arg);
     }
     c.dry_run = flags.contains("--dry-run");
     if (flags.contains("--version")) return c.log("trio {s}", .{version});
@@ -716,13 +951,24 @@ fn run(c: *Ctx, env: *std.process.Environ.Map, argv: []const []const u8) !void {
     const cmd = pos.items[0];
     const args = pos.items[1..];
     const eq = std.mem.eql;
-    if (eq(u8, cmd, "apply") or eq(u8, cmd, "enable") or eq(u8, cmd, "install")) return cmdApply(c);
-    if (eq(u8, cmd, "disable") or eq(u8, cmd, "remove")) return cmdRemove(c);
+    if (eq(u8, cmd, "apply") or eq(u8, cmd, "enable") or eq(u8, cmd, "install")) {
+        if (sel.any()) return applyConfig(c, try applySelection(c, sel, true, false));
+        return cmdApply(c);
+    }
+    if (eq(u8, cmd, "disable") or eq(u8, cmd, "remove")) {
+        if (sel.explicit()) return applyConfig(c, try applySelection(c, sel, false, false));
+        return cmdRemove(c);
+    }
     if (eq(u8, cmd, "uninstall")) return cmdUninstall(c, flags.contains("--yes"));
     if (eq(u8, cmd, "status")) return cmdStatus(c);
     if (eq(u8, cmd, "set")) return cmdSet(c, args);
     if (eq(u8, cmd, "edit")) return cmdEdit(c, env, args);
-    if (eq(u8, cmd, "init")) return cmdInit(c, flags.contains("--force"));
+    if (eq(u8, cmd, "init")) {
+        const was_missing = !exists(c, try c.configPath());
+        try cmdInit(c, flags.contains("--force"));
+        if (sel.any()) return applyConfig(c, try applySelection(c, sel, true, was_missing));
+        return;
+    }
     if (eq(u8, cmd, "path")) return c.log("{s}", .{c.config_dir});
     if (eq(u8, cmd, "version")) return c.log("trio {s}", .{version});
     if (eq(u8, cmd, "help") or flags.contains("--help")) return printHelp(c);

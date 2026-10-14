@@ -1,6 +1,6 @@
 # trio-cli
 
-Run a coding session on three models at once, set up for Claude Code and OpenCode from one config file.
+Run a coding session on three models at once, set up for Claude Code, OpenCode, Cursor, Copilot, Gemini CLI, Droid, Kilo Code and Codex from one config file.
 
 ## Problem
 
@@ -22,12 +22,42 @@ The builder decides when to call the other two. Its prompt tells it to send scou
 
 ## Supported agents
 
-| Agent | Target id | Agents are written to | Starts as builder by default |
-|---|---|---|---|
-| [Claude Code](https://claude.com/claude-code) | `claude` | `~/.claude/agents/` | Yes |
-| [OpenCode](https://opencode.ai) | `opencode` | `~/.config/opencode/agents/` | No, opt-in (paid default models) |
+| Agent | Flag | Agents are written to (global) | Project folder | Default builder |
+|---|---|---|---|---|
+| [Claude Code](https://claude.com/claude-code) | `--claude` | `~/.claude/agents/` | `.claude/agents/` | Yes (`setDefault`) |
+| [OpenCode](https://opencode.ai) | `--opencode` | `~/.config/opencode/agents/` | `.opencode/agents/` | Opt-in |
+| Cursor | `--cursor` | `~/.cursor/agents/` | `.cursor/agents/` | No |
+| GitHub Copilot | `--copilot` | `~/.copilot/agents/*.agent.md` | `.github/agents/` | No |
+| Gemini CLI | `--gemini` | `~/.gemini/agents/` | `.gemini/agents/` | No |
+| Factory Droid | `--droid` | `~/.factory/droids/` | `.factory/droids/` | No |
+| Kilo Code | `--kilo` | `~/.config/kilo/agent/` | `.kilo/agents/` | No |
+| Codex | `--codex` | `~/.codex/agents/*.toml` | `.codex/agents/` | No |
 
-Each target can be turned off with `trio set targets.<id>.enabled false`. Another agent can be added as a new target, see [Add a target](#add-a-target).
+Claude Code and OpenCode are on by default. The others are off until you pick them. Their default model is `inherit`, so set real models first:
+
+```bash
+trio set roles.scout.models.cursor <model-id>
+```
+
+The formats for Cursor, Copilot, Gemini, Droid, Kilo and Codex were taken from each tool's public docs and are not tested against the tools themselves. If a tool rejects a file, open an issue with the error.
+
+Not supported: Windsurf, Cline, Antigravity, Hermes, OpenClaw, Roo Code, Oh My Pi, Trae, Kimi and Pi. They have no file-based subagent with its own model that trio can write, or no documented format yet.
+
+### Pick agents and folders
+
+Global is the default. Name the agents you want, and optionally a folder:
+
+```bash
+trio init --opencode                    # turn OpenCode on, global (on a fresh install: OpenCode only)
+trio apply --cursor --codex             # turn these on, keep the rest as is
+trio apply --all                        # every supported agent
+trio apply --copilot --dir ~/work/app   # Copilot agents inside ~/work/app
+trio apply --gemini --project           # Gemini agents inside the current folder
+trio apply --copilot -g                 # move Copilot back to global
+trio disable --cursor                   # remove Cursor's agents only
+```
+
+On a fresh install, `trio init --cursor` turns on Cursor only. Scope is per agent: one agent is either global or in one folder.
 
 ## Install
 
@@ -53,13 +83,14 @@ zig build -Drelease=true      # binary at zig-out/bin/trio
 ## Use
 
 ```bash
-trio apply [--dry-run]    # generate agents for every enabled target
+trio apply [--<agent>|--all] [--project|--dir <folder>|-g] [--dry-run]
+                          # generate agents for every enabled target, or the ones you name
 trio status               # show what is configured and installed
 trio set <key> <value>    # change one value, then apply
 trio edit [what]          # open config, builder, scout or advisor in $EDITOR, then apply
-trio init [--force]       # write the default config (--force resets yours)
+trio init [--<agent>] [--force]  # write the default config (--force resets yours), turn on named agents
 trio enable               # turn trio on: generate the agents (same as apply)
-trio disable              # turn trio off: delete generated agents, restore the previous default agent, keep the config
+trio disable [--<agent>]  # turn trio off: delete generated agents, restore the previous default agent, keep the config
 trio uninstall --yes      # disable, then delete the config and the trio binary itself
 trio path                 # print the config directory
 trio version              # print the version
@@ -115,17 +146,15 @@ In the prompts, `{{builder}}`, `{{scout}}` and `{{advisor}}` become the agent na
 
 | Key | Effect |
 |---|---|
-| `scope` | `user` installs globally. `project` installs into the directory where you run `trio`. |
+| `scope` | `user` installs globally. `project` installs into `dir`, or into the directory where you run `trio` when `dir` is not set. |
+| `dir` | Project folder for `scope: project`. Set it with `--dir`. |
 | `setDefault` | Starts every new session as the builder. It sets `agent` in Claude Code's `settings.json` or `default_agent` in `opencode.json`. |
 | `description` | The text the builder reads to decide when to call the agent. |
 | `frontmatter.<target>` | Extra keys merged into that target's agent file, such as `tools`, `permission` or `temperature`. |
 
 ## What it writes
 
-| Target | Agents | Default agent |
-|---|---|---|
-| Claude Code | `~/.claude/agents/<name>.md` | `agent` in `~/.claude/settings.json` |
-| OpenCode | `~/.config/opencode/agents/<name>.md` | `default_agent` in `~/.config/opencode/opencode.json` |
+Agent files go where the [table above](#supported-agents) says. Only Claude Code and OpenCode also change a settings file, to set the default agent: `agent` in `~/.claude/settings.json` and `default_agent` in `~/.config/opencode/opencode.json`.
 
 `trio` protects files it did not write:
 
@@ -136,7 +165,7 @@ In the prompts, `{{builder}}`, `{{scout}}` and `{{advisor}}` become the agent na
 
 ## Add a target
 
-Add a variant to the `Target` enum in `src/main.zig` and implement `agentPath`, `settingsPath`, `render`, `getDefault` and `setDefault` for it. Then add a `targets.<id>` block and a `models.<id>` entry per role to `defaults/config.json`.
+Add a variant to the `Target` enum in `src/main.zig` and describe it in `Target.spec()` (directories, file extension, markdown or TOML, which frontmatter keys it takes). Then add a `targets.<id>` block and a `models.<id>` entry per role to `defaults/config.json`. A tool that can name a default agent also needs `getDefault`, `setDefault` and `settingsPath`.
 
 ## Test
 
