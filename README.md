@@ -69,7 +69,7 @@ This downloads the `trio` binary for your OS (macOS or Linux, arm64 or x64) into
 
 | Variable | Effect |
 |---|---|
-| `TRIO_VERSION=v0.3.0` | Install a specific release instead of the latest |
+| `TRIO_VERSION=v0.4.0` | Install a specific release instead of the latest |
 | `TRIO_INSTALL_DIR=/usr/local/bin` | Install somewhere other than `~/.local/bin` |
 | `TRIO_NO_APPLY=1` | Install the binary only, skip `trio apply` |
 
@@ -179,7 +179,7 @@ test/smoke.sh
 Push a tag and GitHub Actions builds the four binaries and publishes them with a `SHA256SUMS` file, which `install.sh` checks:
 
 ```bash
-git tag v0.3.0 && git push --tags
+git tag v0.4.0 && git push --tags
 ```
 
 ## License
