@@ -20,6 +20,15 @@ trio-cli splits the session into three agents:
 
 The builder decides when to call the other two. Its prompt tells it to send scouts for anything that needs a sweep of several files, and to consult the advisor at three moments only: before a large or hard-to-undo change, after the same error survives two fixes, and before reporting a non-trivial task as done.
 
+## Supported agents
+
+| Agent | Target id | Agents are written to | Starts as builder by default |
+|---|---|---|---|
+| [Claude Code](https://claude.com/claude-code) | `claude` | `~/.claude/agents/` | Yes |
+| [OpenCode](https://opencode.ai) | `opencode` | `~/.config/opencode/agents/` | No, opt-in (paid default models) |
+
+Each target can be turned off with `trio set targets.<id>.enabled false`. Another agent can be added as a new target, see [Add a target](#add-a-target).
+
 ## Install
 
 ```bash
@@ -30,7 +39,7 @@ This downloads the `trio` binary for your OS (macOS or Linux, arm64 or x64) into
 
 | Variable | Effect |
 |---|---|
-| `TRIO_VERSION=v0.2.1` | Install a specific release instead of the latest |
+| `TRIO_VERSION=v0.3.0` | Install a specific release instead of the latest |
 | `TRIO_INSTALL_DIR=/usr/local/bin` | Install somewhere other than `~/.local/bin` |
 | `TRIO_NO_APPLY=1` | Install the binary only, skip `trio apply` |
 
@@ -49,9 +58,14 @@ trio status               # show what is configured and installed
 trio set <key> <value>    # change one value, then apply
 trio edit [what]          # open config, builder, scout or advisor in $EDITOR, then apply
 trio init [--force]       # write the default config (--force resets yours)
-trio remove               # delete generated agents and restore the previous default agent
+trio enable               # turn trio on: generate the agents (same as apply)
+trio disable              # turn trio off: delete generated agents, restore the previous default agent, keep the config
+trio uninstall --yes      # disable, then delete the config and the trio binary itself
 trio path                 # print the config directory
+trio version              # print the version
 ```
+
+`disable` leaves your config in place, so `enable` brings the same setup back. `uninstall` asks for `--yes` and accepts `--dry-run` to preview. It only deletes the binary if it is named `trio`. `remove` still works as an alias of `disable`.
 
 After `trio apply`, a plain `claude` starts as the builder. In OpenCode the agents are installed but not the default, so press Tab to pick `conductor`, or turn the default on:
 
@@ -115,7 +129,7 @@ In the prompts, `{{builder}}`, `{{scout}}` and `{{advisor}}` become the agent na
 
 `trio` protects files it did not write:
 
-- An agent file you wrote yourself, or edited after `trio` generated it, is copied to `<file>.trio-bak` before `trio` replaces it. `trio remove` leaves it in place.
+- An agent file you wrote yourself, or edited after `trio` generated it, is copied to `<file>.trio-bak` before `trio` replaces it. `trio disable` leaves it in place.
 - Each settings file is copied to `<file>.trio-bak` before its first change.
 - `opencode.json` is edited as text, so your comments and formatting survive.
 - Renaming a role, disabling a target or changing `scope` removes what the previous config installed.
@@ -136,7 +150,7 @@ test/smoke.sh
 Push a tag and GitHub Actions builds the four binaries and publishes them with a `SHA256SUMS` file, which `install.sh` checks:
 
 ```bash
-git tag v0.2.1 && git push --tags
+git tag v0.3.0 && git push --tags
 ```
 
 ## License

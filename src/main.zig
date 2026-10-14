@@ -8,7 +8,7 @@ const Value = json.Value;
 const Allocator = std.mem.Allocator;
 const path_util = std.Io.Dir.path;
 
-const version = "0.2.1";
+const version = "0.3.0";
 const role_keys = [_][]const u8{ "builder", "scout", "advisor" };
 
 const default_files = [_]struct { rel: []const u8, data: []const u8 }{
@@ -29,7 +29,9 @@ const help_text =
     \\                                  trio set targets.opencode.setDefault true
     \\  trio edit [what]           Open config | builder | scout | advisor in $EDITOR, then apply
     \\  trio init [--force]        Write the default config and prompts (--force overwrites yours)
-    \\  trio remove [--dry-run]    Delete generated agents and restore the previous default agent
+    \\  trio enable                Turn trio on: generate the agents (same as apply)
+    \\  trio disable [--dry-run]   Turn trio off: delete generated agents, restore the previous default agent, keep the config
+    \\  trio uninstall [--yes]     Disable, then delete the config and the trio binary itself
     \\  trio path                  Print the config directory
     \\  trio version               Print the version
     \\
@@ -596,6 +598,28 @@ fn cmdRemove(c: *Ctx) !void {
     c.log("Config kept in {s}", .{c.config_dir});
 }
 
+fn cmdUninstall(c: *Ctx, confirmed: bool) !void {
+    const exe = try std.process.executablePathAlloc(c.io, c.a);
+    const is_trio = std.mem.eql(u8, path_util.basename(exe), "trio");
+    if (!confirmed and !c.dry_run) {
+        c.log("This will disable trio, delete {s} and delete {s}.", .{ c.config_dir, if (is_trio) exe else "(binary: not named trio, left alone)" });
+        return c.fail("re-run with --yes to confirm (or --dry-run to preview)", .{});
+    }
+    try cmdRemove(c);
+    if (!c.dry_run) {
+        const cwd = Io.Dir.cwd();
+        for ([_][]const u8{ "config.json", "state.json" }) |name| try deleteFile(c, try c.join(&.{ c.config_dir, name }));
+        cwd.deleteTree(c.io, try c.join(&.{ c.config_dir, "prompts" })) catch {};
+        cwd.deleteDir(c.io, c.config_dir) catch {}; // stays if the user keeps other files in it
+    }
+    c.log("  {s}  {s}", .{ if (c.dry_run) "would delete" else "deleted     ", c.config_dir });
+    if (is_trio) {
+        if (!c.dry_run) try deleteFile(c, exe);
+        c.log("  {s}  {s}", .{ if (c.dry_run) "would delete" else "deleted     ", exe });
+    }
+    if (!c.dry_run) c.log("trio-cli uninstalled.", .{});
+}
+
 fn cmdStatus(c: *Ctx) !void {
     const cfg = try loadConfig(c);
     const st = try readState(c);
@@ -692,8 +716,9 @@ fn run(c: *Ctx, env: *std.process.Environ.Map, argv: []const []const u8) !void {
     const cmd = pos.items[0];
     const args = pos.items[1..];
     const eq = std.mem.eql;
-    if (eq(u8, cmd, "apply") or eq(u8, cmd, "install")) return cmdApply(c);
-    if (eq(u8, cmd, "remove") or eq(u8, cmd, "uninstall")) return cmdRemove(c);
+    if (eq(u8, cmd, "apply") or eq(u8, cmd, "enable") or eq(u8, cmd, "install")) return cmdApply(c);
+    if (eq(u8, cmd, "disable") or eq(u8, cmd, "remove")) return cmdRemove(c);
+    if (eq(u8, cmd, "uninstall")) return cmdUninstall(c, flags.contains("--yes"));
     if (eq(u8, cmd, "status")) return cmdStatus(c);
     if (eq(u8, cmd, "set")) return cmdSet(c, args);
     if (eq(u8, cmd, "edit")) return cmdEdit(c, env, args);

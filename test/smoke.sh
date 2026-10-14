@@ -109,6 +109,28 @@ trio apply --dry-run
 check "no .claude" missing "$H/.claude"
 check "no state" missing "$H/trio-config/state.json"
 
+echo "disable / enable"
+new_home
+trio apply
+trio disable
+check "disabled: agents gone" missing "$H/.claude/agents/scout.md"
+check "disabled: config kept" test -e "$H/trio-config/config.json"
+trio enable
+check "enabled: agents back" test -e "$H/.claude/agents/scout.md"
+
+echo "uninstall"
+new_home
+mkdir -p "$H/bin" && cp "$BIN" "$H/bin/trio"
+"$H/bin/trio" apply >/dev/null
+check "needs --yes" sh -c "! '$H/bin/trio' uninstall >/dev/null 2>&1"
+check "still installed without --yes" test -e "$H/bin/trio"
+"$H/bin/trio" uninstall --dry-run >/dev/null
+check "dry run keeps binary" test -e "$H/bin/trio"
+"$H/bin/trio" uninstall --yes >/dev/null
+check "agents gone" missing "$H/.claude/agents/scout.md"
+check "config gone" missing "$H/trio-config"
+check "binary gone" missing "$H/bin/trio"
+
 echo "misc"
 check "version" sh -c "'$BIN' version | grep -q '^trio '"
 check "unknown command fails" sh -c "! '$BIN' bogus >/dev/null 2>&1"
